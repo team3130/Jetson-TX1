@@ -1,0 +1,455 @@
+Jetson TX1:  Camera Vision Tracking:
+
+Harriet code: https://github.com/team3130/Harriet
+
+Errors 3130 info:  https://docs.google.com/document/d/1h24D2XVDBXtN5IePFZoTq0fVOY0iaZhbWI-fzVt3ejY/mobilebasic
+
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+# First  fix broken link in the jetson OS image:
+-------------------------------------------------------------------------------
+
+cd /usr/lib/aarch64-linux-gnu/
+sudo rm libGL.so
+sudo ln -s /usr/lib/aarch64-linux-gnu/tegra/libGL.so libGL.so
+
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+ sdcard setup.  
+ We need more space for building opencv and "patched" gstreamer, it takes 9 GB of space when building...
+-------------------------------------------------------------------------------
+
+# Mount sdcard and format as  ext4  (we need ext4 format so the system has symbolic linking ability)
+
+# First unmount the sdcard if it is fat32 formatted. (Our sdcard was mounted as /media/ubuntu/6261-3638   YMMV here):
+sudo umount /media/ubuntu/6261-3638
+
+# find the sdcard device:
+ls /dev/mmc*
+# it was mmcblk1 in our case
+
+#  now create a partition via fdisk.  
+sudo fdisk /dev/mmcblk1
+
+# Once in fdisk, delete any existing partition(s) and create a new ext4 partition: use the entire device and select ext4 as type.
+# 	Google how to use fdisk if you need help here....
+# 	Exit dfisk 
+
+# Then make a file system on the new partition you just created:
+sudo mkfs.ext4 /dev/mmcblk1p1
+
+#  Setup the fstab file to auto mount the sdcard on our desired mount point: /home/ubuntu/sdcard/
+# 	edit the file via:
+sudo nano /etc/fstab
+# add this line to fstab (Use Ctrl-O  to write the changes, the Ctrl-X  to exit nano.)
+/dev/mmcblk1p1 /home/ubuntu/sdcard ext4 defaults 0
+
+# get the sdcard mounted where we need it.  (Or you can reboot the jetson)
+sudo mount -a
+	
+	
+	
+-------------------------------------------------------------------------------	
+-------------------------------------------------------------------------------
+Setup OpenCV 3.2 on Jetson
+2017-06-19
+-------------------------------------------------------------------------------
+
+# Download OpenCV3.2 source code to ~/sdcard
+cd ~/sdcard
+wget --no-check-certificate https://netcologne.dl.sourceforge.net/project/opencvlibrary/opencv-unix/3.2.0/opencv-3.2.0.zip
+
+# Untar opencv3.2 source in ~/sdcard  
+# (You can use the xarchive GUI program, or command line)
+unzip ./opencv-3.2.0.zip
+
+# OPTIONAL:  download any additional modules and put in ~/sdcard/
+cd ~/sdcard/
+wget --no-check-certificate https://github.com/opencv/opencv_contrib/archive/3.2.0.tar.gz -O opencv_contrib-3.2.0.tar.gz
+
+# untar the opencv_contrib-3.2.0.tar.gz
+# (You can use the xarchive GUI program, or command line)
+tar xf ./opencv_contrib-3.2.0.tar.gz
+
+#make the build directory if it does not exist
+mkdir ~/sdcard/opencv-3.2.0/build
+
+cd ~/sdcard/opencv-3.2.0/build
+
+# configure the build process (If you downloaded additional modules):
+cmake  -DWITH_CUDA=ON -DCUDA_ARCH_BIN="5.3" -DCUDA_ARCH_PTX="" -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DCUDA_FAST_MATH=ON \
+   -DCMAKE_INSTALL_PREFIX=/usr/local -DOPENCV_EXTRA_MODULES_PATH=~/sdcard/opencv_contrib-3.2.0/modules/ ~/sdcard/opencv-3.2.0/
+
+# OR  configure the build process (If you DID NOT  downloaded additional modules):
+cmake  -DWITH_CUDA=ON -DCUDA_ARCH_BIN="5.3" -DCUDA_ARCH_PTX="" -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF -DCUDA_FAST_MATH=ON \
+   -DCMAKE_INSTALL_PREFIX=/usr/local ~/sdcard/opencv-3.2.0/
+
+# run make,  it will take a LONG time 
+make
+
+# Now install the built components:
+sudo make install
+
+
+-------------------------------------------------------------------------------
+   Optional:  build openvc samples for testing purposes:
+-------------------------------------------------------------------------------
+cd ~/sdcard/opencv-3.2.0/samples
+cmake ~/sdcard/opencv-3.2.0/samples/
+make
+
+
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+setup WPIlib ntcore on TX1
+2017-06-17
+For basic instruction to build the lib:
+	https://github.com/wpilibsuite/ntcore/blob/master/README.md
+-------------------------------------------------------------------------------
+
+# on the jetson:
+mkdir ~/git
+
+# get the ntcore source code:
+cd ~/git
+wget --no-check-certificate https://github.com/wpilibsuite/ntcore/archive/master.zip -O ntcore.zip
+unzip ntcore.zip
+
+#rename the directory:
+mv ntcore-master ntcore
+
+cd ~/git/ntcore/
+
+# make build directory:
+mkdir build	
+cd build
+cmake ~/git/ntcore
+make
+#	....wait for make to finish.
+#		Then deploy:
+sudo make install
+
+
+
+	
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+ gstreamer  patch and build
+-------------------------------------------------------------------------------
+
+
+Follow these instructions to patch gstreamer to make Sony camera compatible with opencv, (we tried version 1.12.1 in addition to 1.8.0)
+http://developer.ridgerun.com/wiki/index.php?title=Compile_gstreamer_on_tegra_X1
+
+Note:  in the instructions below I set the VERSION variable many times, this was done
+because I did these steps over several days and power cycles occurred in between some steps ...
+You really only need to set VERSION once at the beginning if the system stays powered on during the entire process.
+
+2017-06-27  Tried a newer version 1.12.1 of gstreamer.  
+
+-------------------------------------------------------------------------------
+
+#  Step 1:  Get source code (You can cut and paste these lines into a linux shell)
+
+# set a shell variable equal to the version we want:
+#2017-06-27  update:  1.8.0 had problems with opencv, so I tried 1.12.1 also:
+VERSION=1.12.1
+
+cd ~/sdcard/
+mkdir ~/gst_$VERSION
+cd ~/gst_$VERSION
+
+wget --no-check-certificate https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-$VERSION.tar.xz
+wget --no-check-certificate https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-$VERSION.tar.xz
+wget --no-check-certificate https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-$VERSION.tar.xz
+wget --no-check-certificate https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-$VERSION.tar.xz
+wget --no-check-certificate https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-$VERSION.tar.xz
+for a in `ls -1 *.tar.*`; do tar -xf $a; done
+
+# Step 2:  Install dependencies
+
+sudo apt-get install build-essential dpkg-dev flex bison autotools-dev automake \
+liborc-dev autopoint libtool gtk-doc-tools libgstreamer1.0-dev \
+libxv-dev libasound2-dev libtheora-dev libogg-dev libvorbis-dev \
+libbz2-dev libv4l-dev libvpx-dev libjack-jackd2-dev libsoup2.4-dev libpulse-dev \
+faad libfaad-dev libfaac-dev libgl1-mesa-dev libgles2-mesa-dev \
+libx264-dev libmad0-dev
+
+
+# Step 3:  PKG_CONFIG_PATH
+
+export PKG_CONFIG_PATH=/home/$USER/sdcard/gst_$VERSION/out/lib/pkgconfig
+#check it is set:
+echo $PKG_CONFIG_PATH
+
+
+
+################################################################
+# Step 4:  Build  (according to ridgerun, we need to do a build before patching source files....)
+
+# 2017-06-27  update: Try newer 1.12.1 version
+VERSION=1.12.1
+export MYPKG_OUT=/home/$USER/sdcard/gst_$VERSION/out
+
+cd ~/sdcard/gstreamer-$VERSION
+	
+# Build  all dirs automatically with the following lines:
+# force a prompting for sudo password such that the sudo in the automatic build does not hang-up waiting for a password
+sudo ls
+
+#now the automatic build:
+for dir in `ls -1r --hide=*tar.xz`; do cd $dir; ./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log; \ 
+ time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log; cd ..; done
+ 
+#check to make sure log files are many K bytes in size.  If not, then build failed.
+for a in `find ./ -name"*.our.log"`; do ls -l $a; done
+
+# ****   skip to step 5 if you did automatic build.  *******
+#############################################################
+
+#Or do build manually as below.  ***  SKIP to step 5 if you did the automatic build!!!!  ***
+
+#
+cd ~/sdcard/gstreamer-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log; cd ..
+
+#Base
+cd gst-plugins-base-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log ; cd ..
+
+#Good - 8 minutes
+cd gst-plugins-good-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log ; cd ..
+
+#Bad
+cd gst-plugins-bad-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log ; cd ..
+# on Bad make saw these errors:
+		/usr/lib/gcc/aarch64-linux-gnu/5/../../../aarch64-linux-gnu/libGL.so: undefined reference to `drmMap'
+		/usr/lib/gcc/aarch64-linux-gnu/5/../../../aarch64-linux-gnu/libGL.so: undefined reference to `drmCloseOnce'
+		/usr/lib/gcc/aarch64-linux-gnu/5/../../../aarch64-linux-gnu/libGL.so: undefined reference to `drmUnmap'
+		/usr/lib/gcc/aarch64-linux-gnu/5/../../../aarch64-linux-gnu/libGL.so: undefined reference to `drmOpenOnce'
+#	This is the solution:  https://devtalk.nvidia.com/default/topic/946136/
+		# Our solution was to change the Link of the GL library from pointing to "/usr/lib/aarch64-linux-gnu/mesa" to "/usr/lib/aarch64-linux-gnu/tegra
+		# So do this:
+		cd /usr/lib/aarch64-linux-gnu
+		sudo rm libGL.so
+		sudo ln -s /usr/lib/aarch64-linux-gnu/tegra/libGL.so libGL.so
+		
+		ON the Jetson we checked libGL.so:
+			ls /usr/lib/aarch64-linux-gnu/tegra/libGL.so
+			lrwxrwxrwx 1 root root     13 Jan 26 00:26 /usr/lib/aarch64-linux-gnu/tegra/libGL.so -> mesa/libGL.so
+		
+		made above changes to re link the file to the tegra directory. Then rebuilt bad plugins.
+		
+		
+# Ugly
+cd gst-plugins-ugly-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make 2>&1 | tee our.make.log; sudo make install 2>&1 | tee our.makeinstall.log ; cd ..
+
+
+
+
+
+##########################################################
+##########################################################
+#  Step 5:
+
+VERSION=1.12.1
+export LD_LIBRARY_PATH=/home/$USER/gst_$VERSION/out/lib/
+
+###########################################################
+# Step 5b:   Patch the gstreamer to support the Sony camera format:
+
+Steps to patch gstreamer to support RAW10
+The Gstreamer version distributed with Jetpack doesn't support bayer RAW10 only RAW8 so 
+gstreamer needs to be patched in order to capture using v4l2src. 
+Since the plugins where already recompiled you can patch v4l2src in your working dir to get it working with RAW10 following the next steps.
+
+1- Apply the following patch to the gst-plugins good:
+
+Index: gst_1.8.0/gst-plugins-good-1.8.0/sys/v4l2/gstv4l2object.c
+===================================================================
+--- gst_1.8.0.orig/gst-plugins-good-1.8.0/sys/v4l2/gstv4l2object.c	2016-03-08 18:41:48.000000000 +0000
++++ gst_1.8.0/gst-plugins-good-1.8.0/sys/v4l2/gstv4l2object.c	2016-09-08 20:27:25.334215333 +0000
+@@ -160,10 +160,10 @@
+   {V4L2_PIX_FMT_NV42, TRUE, GST_V4L2_RAW},
+ 
+   /* Bayer formats - see http://www.siliconimaging.com/RGB%20Bayer.htm */
+-  {V4L2_PIX_FMT_SBGGR8, TRUE, GST_V4L2_CODEC},
+-  {V4L2_PIX_FMT_SGBRG8, TRUE, GST_V4L2_CODEC},
+-  {V4L2_PIX_FMT_SGRBG8, TRUE, GST_V4L2_CODEC},
+-  {V4L2_PIX_FMT_SRGGB8, TRUE, GST_V4L2_CODEC},
++  {V4L2_PIX_FMT_SBGGR10, TRUE, GST_V4L2_CODEC},
++  {V4L2_PIX_FMT_SGBRG10, TRUE, GST_V4L2_CODEC},
++  {V4L2_PIX_FMT_SGRBG10, TRUE, GST_V4L2_CODEC},
++  {V4L2_PIX_FMT_SRGGB10, TRUE, GST_V4L2_CODEC},
+ 
+   /* compressed formats */
+   {V4L2_PIX_FMT_MJPEG, FALSE, GST_V4L2_CODEC},
+@@ -1043,10 +1043,10 @@
+       rank = 0;
+       break;
+ 
+-    case V4L2_PIX_FMT_SBGGR8:
+-    case V4L2_PIX_FMT_SGBRG8:
+-    case V4L2_PIX_FMT_SGRBG8:
+-    case V4L2_PIX_FMT_SRGGB8:
++    case V4L2_PIX_FMT_SBGGR10:
++    case V4L2_PIX_FMT_SGBRG10:
++    case V4L2_PIX_FMT_SGRBG10:
++    case V4L2_PIX_FMT_SRGGB10:
+       rank = BAYER_BASE_RANK;
+       break;
+ 
+@@ -1432,15 +1432,15 @@
+       break;
+     case V4L2_PIX_FMT_WNVA:    /* Winnov hw compres */
+       break;
+-    case V4L2_PIX_FMT_SBGGR8:
+-    case V4L2_PIX_FMT_SGBRG8:
+-    case V4L2_PIX_FMT_SGRBG8:
+-    case V4L2_PIX_FMT_SRGGB8:
++    case V4L2_PIX_FMT_SBGGR10:
++    case V4L2_PIX_FMT_SGBRG10:
++    case V4L2_PIX_FMT_SGRBG10:
++    case V4L2_PIX_FMT_SRGGB10:
+       structure = gst_structure_new ("video/x-bayer", "format", G_TYPE_STRING,
+-          fourcc == V4L2_PIX_FMT_SBGGR8 ? "bggr" :
+-          fourcc == V4L2_PIX_FMT_SGBRG8 ? "gbrg" :
+-          fourcc == V4L2_PIX_FMT_SGRBG8 ? "grbg" :
+-          /* fourcc == V4L2_PIX_FMT_SRGGB8 ? */ "rggb", NULL);
++          fourcc == V4L2_PIX_FMT_SBGGR10 ? "bggr" :
++          fourcc == V4L2_PIX_FMT_SGBRG10 ? "gbrg" :
++          fourcc == V4L2_PIX_FMT_SGRBG10 ? "grbg" :
++          fourcc == V4L2_PIX_FMT_SRGGB10 ? "rggb" : "rggb" , NULL);
+       break;
+     case V4L2_PIX_FMT_SN9C10X:
+       structure = gst_structure_new_empty ("video/x-sonix");
+@@ -1739,13 +1739,13 @@
+       const gchar *format = gst_structure_get_string (structure, "format");
+       if (format) {
+ 	if (!g_ascii_strcasecmp (format, "bggr"))
+-	  fourcc = V4L2_PIX_FMT_SBGGR8;
++	  fourcc = V4L2_PIX_FMT_SBGGR10;
+ 	else if (!g_ascii_strcasecmp (format, "gbrg"))
+-	  fourcc = V4L2_PIX_FMT_SGBRG8;
++	  fourcc = V4L2_PIX_FMT_SGBRG10;
+ 	else if (!g_ascii_strcasecmp (format, "grbg"))
+-	  fourcc = V4L2_PIX_FMT_SGRBG8;
++	  fourcc = V4L2_PIX_FMT_SGRBG10;
+ 	else if (!g_ascii_strcasecmp (format, "rggb"))
+-	  fourcc = V4L2_PIX_FMT_SRGGB8;
++	  fourcc = V4L2_PIX_FMT_SRGGB10;
+       }
+     } else if (g_str_equal (mimetype, "video/x-sonix")) {
+       fourcc = V4L2_PIX_FMT_SN9C10X;
+
+
+# 2- Recompile the plugins-good  after patching:
+
+cd ~/sdcard/gstreamer-$VERSION/gst-plugins-good-$VERSION
+./configure --prefix=$MYPKG_OUT 2>&1 | tee our.config.log ; time make ; sudo make install ;
+
+
+######################################################
+#  6. Copy the NVIDIA libraries to our new build
+
+ls /usr/lib/aarch64-linux-gnu/gstreamer-1.0 | grep nv
+libgstaudioconvert.so
+libgstnvcamera.so
+libgstnveglglessink.so
+libgstnveglstreamsrc.so
+libgstnvegltransform.so
+libgstnvivafilter.so
+libgstnvvidconv.so
+libgstnvvideosink.so
+libgstvideoconvert.so
+libnvgstjpeg.so
+
+cd /usr/lib/aarch64-linux-gnu/gstreamer-1.0/
+cp libgstnv* libnvgst* libgstomx.so ~/sdcard/gst_$VERSION/out/lib/gstreamer-1.0/
+cd ~/sdcard/gst_$VERSION
+
+
+#  3- Export the libraries:
+
+VERSION=1.12.1
+export LD_LIBRARY_PATH=/home/$USER/sdcard/gst_$VERSION/out/lib/
+
+
+# Note: original value for LD_LIBRARY_PATH  lib path was:
+ubuntu@tegra-ubuntu:~$ echo $LD_LIBRARY_PATH
+/usr/local/cuda-8.0/lib64:
+
+
+
+===================================================
+# Try copying the patched build of gst 1.8.3 to the normal /usr/lib and /usr/bin  paths...
+# replace existing *.803 version of libs and bins
+
+# Copy The lib files:
+cd ~/sdcard/gst_1.8.3/out/lib
+for a in `find ./ -name 'libgst*.803.0'`;do sudo cp $a /usr/lib/aarch64-linux-gnu/;done
+# Copy The bin files:
+cd ../bin
+sudo cp gst-* /usr/bin/
+
+ 
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+-------------------------------------------------------------------------------
+4- Capturing from a sensor using RAW10 in either rggb,gbrg,grbg or bggr pixel order using gstreamer should be possible now, try running the following example pipeline:
+
+gst-launch-1.0 -vvv v4l2src ! 'video/x-bayer, width=(int)1920, height=(int)1080, format=(string)bggr, framerate=(fraction)30/1' ! fakesink  silent=false 
+# 2017-06-25, after moving libs and bins the above still failed.
+
+gst-launch-1.0 -vvv v4l2src num-buffers=10  ! 'video/x-bayer, width=(int)1920, height=(int)1080, format=(string)rggb, framerate=(fraction)30/1' ! multifilesink location=test%d.raw  -v
+# 2017-06-25, after moving libs and bins  the above still failed.
+
+
+
+--------------------------------------------------
+--------------------------------------------------
+--------------------------------------------------
+--------------------------------------------------
+#utils to get camera info:
+sudo apt-get install v4l-utils
+v4l2-ctl --list-devices
+v4l2-ctl --list-formats
+
+gst-discoverer-1.0 /dev/video0
+
+
+-------------------------------------------------
+-------------------------------------------------
+-------------------------------------------------
+-------------------------------------------------
+Test Harriet  ./takepics   with new opencv 3.2:
+
+		ubuntu@tegra-ubuntu:~/git/Harriet/build$ ./takepics 
+		Option 'auto' for auto exposure
+
+		 ESC	Quit
+		 w	Save picture in a sequential file
+		 s	Pause, freeze the frame
+		 Space	Change display mode
+
+		VIDEOIO ERROR: V4L2: Pixel format of incoming image is unsupported by OpenCV
+		Unable to stop the stream: Invalid argument
+		GStreamer Plugin: Embedded video playback halted; module v4l2src0 reported: Internal data flow error.
+		OpenCV Error: Unspecified error (GStreamer: unable to start pipeline
+		) in cvCaptureFromCAM_GStreamer, file /home/ubuntu/sdcard/opencv-3.2.0/modules/videoio/src/cap_gstreamer.cpp, line 832
+		VIDEOIO(cvCreateCapture_GStreamer(CV_CAP_GSTREAMER_V4L2, reinterpret_cast<char *>(index))): raised OpenCV exception:
+
+		/home/ubuntu/sdcard/opencv-3.2.0/modules/videoio/src/cap_gstreamer.cpp:832: error: (-2) GStreamer: unable to start pipeline
+		 in function cvCaptureFromCAM_GStreamer
+
+		Couldn't connect to camera
+		^C
