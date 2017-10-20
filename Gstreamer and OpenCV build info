@@ -269,6 +269,7 @@ Steps to patch gstreamer to support RAW10
 The Gstreamer version distributed with Jetpack doesn't support bayer RAW10 only RAW8 so 
 gstreamer needs to be patched in order to capture using v4l2src. 
 Since the plugins where already recompiled you can patch v4l2src in your working dir to get it working with RAW10 following the next steps.
+See conversation at https://devtalk.nvidia.com/default/topic/968767/jetson-tx1/viewing-raw-bayer-data/post/4995325/#4995325 for more details.
 
 1- Apply the following patch to the gst-plugins good:
 
